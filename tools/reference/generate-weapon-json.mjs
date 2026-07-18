@@ -2,8 +2,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { splitCsvText } from "../utils/csv-parser.mjs";
-import { parseReferenceWeaponRows } from "./weapons.mjs";
+import { splitCsvText } from "../../scripts/utils/csv-parser.mjs";
+import { parseReferenceWeaponRows } from "../../scripts/reference/weapons.mjs";
 
 // Minimal Foundry utils shim so normalizeGearSystemData works in Node.
 globalThis.foundry = globalThis.foundry ?? {};

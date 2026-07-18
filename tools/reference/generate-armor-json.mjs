@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { splitCsvText, findHeaderRowIndex, buildHeaderMap } from "../utils/csv-parser.mjs";
+import { splitCsvText, findHeaderRowIndex, buildHeaderMap } from "../../scripts/utils/csv-parser.mjs";
 
 const MYTHIC_ARMOR_RULE_HINT_PATTERNS = Object.freeze([
   ["biofoam-injector-port", /biofoam\s+injector\s+port/u],
