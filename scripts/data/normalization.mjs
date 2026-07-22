@@ -39,7 +39,10 @@ import {
   normalizeTrainingData,
 } from "../mechanics/training.mjs";
 import { buildSkillRankDefaults } from "../mechanics/skills.mjs";
-import { computeCharacterDerivedValues } from "../mechanics/derived.mjs";
+import {
+  computeCharacteristicModifiers,
+  computeCharacterDerivedValues,
+} from "../mechanics/derived.mjs";
 import {
   coerceMythicCharacteristicMap,
   getCharacterEffectiveMythicCharacteristics,
@@ -3283,6 +3286,9 @@ export function normalizeBestiarySystemData(systemData) {
   merged.combat.luck.current = finalLuckCurrent;
 
   const recalculated = normalizeCharacterSystemData(merged);
+  recalculated.characteristicModifiers = computeCharacteristicModifiers(
+    recalculated.characteristics,
+  );
   recalculated.bestiary = merged.bestiary;
   recalculated.mythic.characteristics = foundry.utils.deepClone(
     merged.mythic.characteristics,
