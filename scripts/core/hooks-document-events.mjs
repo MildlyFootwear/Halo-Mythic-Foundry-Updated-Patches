@@ -37,7 +37,10 @@ import {
   applyGroupCreationDefaults,
 } from "../mechanics/xp.mjs";
 
-import { isGoodFortuneModeEnabled } from "../mechanics/derived.mjs";
+import {
+  computeCharacteristicModifiers,
+  isGoodFortuneModeEnabled,
+} from "../mechanics/derived.mjs";
 import { getActorEquippedGearMythicCharacteristicModifiers } from "../mechanics/mythic-characteristics.mjs";
 import {
   normalizeActorCharacterSystemData,
@@ -6391,6 +6394,14 @@ export function registerMythicDocumentAndChatHooks({
       );
       nextSystem = preparedSystem.systemData;
       const finalCharacteristics = preparedSystem.finalCharacteristics;
+      const preparedCharacteristics = finalCharacteristics?.characteristics;
+      if (preparedSystem.applied === true && preparedCharacteristics) {
+        foundry.utils.setProperty(
+          nextSystem,
+          "characteristicModifiers",
+          computeCharacteristicModifiers(preparedCharacteristics),
+        );
+      }
       traceCharacteristicNormalization(actor, {
         beforeCharacteristics: beforeFinalCharacteristics,
         finalCharacteristics: finalCharacteristics?.characteristics,
