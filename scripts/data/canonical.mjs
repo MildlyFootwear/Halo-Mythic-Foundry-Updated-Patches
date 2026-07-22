@@ -35,6 +35,18 @@ export function getCanonicalCharacterSystemData() {
       cha: 0,
       ldr: 0
     },
+    characteristicModifiers: {
+      str: 0,
+      tou: 0,
+      agi: 0,
+      wfm: 0,
+      wfr: 0,
+      int: 0,
+      per: 0,
+      crg: 0,
+      cha: 0,
+      ldr: 0
+    },
     charBuilder: {
       managed: false,
       lowerTierUnlockEnabled: false,
