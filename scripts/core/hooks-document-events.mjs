@@ -6455,7 +6455,9 @@ export function registerMythicDocumentAndChatHooks({
         intendedWoundsBarValue,
         helperOutputUsingActorAndNextSystem: canonicalWounds,
       });
-      const normalized = normalizeCharacterSystemData(nextSystem);
+      const normalized = normalizeCharacterSystemData(nextSystem, {
+        preservePreparedCharacteristics: preparedSystem.applied === true,
+      });
       traceWounds(
         "preUpdate after normalization before canonical correction",
         actor,
