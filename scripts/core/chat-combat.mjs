@@ -1,8 +1,5 @@
 import { toNonNegativeWhole, normalizeLookupText } from "../utils/helpers.mjs";
 import {
-  normalizeSkillsData,
-} from "../data/normalization.mjs";
-import {
   loadMythicMedicalEffectDefinitions,
   loadMythicSpecialDamageDefinitions,
 } from "../data/content-loading.mjs";
@@ -17,7 +14,9 @@ import {
   resolveActorDrRows,
 } from "../mechanics/damage-resistance.mjs";
 import { normalizeActorCharacterSystemData } from "../mechanics/final-characteristics.mjs";
-import { getSkillTierBonus } from "../reference/ref-utils.mjs";
+import {
+  getActorEvasionTarget,
+} from "../mechanics/source-of-truth.mjs";
 import { buildRollTooltipHtml } from "../ui/roll-tooltips.mjs";
 import { MYTHIC_MEDICAL_AUTOMATION_ENABLED_SETTING_KEY } from "../config.mjs";
 import {
@@ -604,17 +603,7 @@ export async function mythicRollEvasion(
         : Number.isFinite(Number(incoming?.dosValue))
           ? Number(incoming.dosValue)
           : fallbackAttackDOS;
-      const skillsNorm = normalizeSkillsData(evadingActor.system?.skills);
-      const evasionSkill = skillsNorm.base?.evasion ?? {};
-      const tierBonus = getSkillTierBonus(
-        evasionSkill.tier ?? "untrained",
-        evasionSkill.category ?? "basic",
-      );
-      const agiValue = toNonNegativeWhole(
-        evadingActor.system?.characteristics?.agi,
-        0,
-      );
-      const evasionMod = Number(evasionSkill.modifier ?? 0);
+      const evasionBase = getActorEvasionTarget(evadingActor);
       const reactionPenalty = reactionCount * -10;
       const fatiguePenalty = getFatigueRollModifier(evadingActor);
       const berserkerPenalty = getBerserkerEvasionTestModifier(
@@ -623,9 +612,7 @@ export async function mythicRollEvasion(
       );
       const evasionTarget = Math.max(
         0,
-        agiValue +
-          tierBonus +
-          evasionMod +
+        evasionBase +
           reactionPenalty +
           miscModifier +
           fatiguePenalty +
@@ -1346,17 +1333,7 @@ export async function mythicRollEvadeIntoCover(
       combat: game.combat,
     });
     const evadingActor = reactionSpend?.actor ?? actor;
-    const skillsNorm = normalizeSkillsData(evadingActor.system?.skills);
-    const evasionSkill = skillsNorm.base?.evasion ?? {};
-    const tierBonus = getSkillTierBonus(
-      evasionSkill.tier ?? "untrained",
-      evasionSkill.category ?? "basic",
-    );
-    const agiValue = toNonNegativeWhole(
-      evadingActor.system?.characteristics?.agi,
-      0,
-    );
-    const evasionMod = Number(evasionSkill.modifier ?? 0);
+    const evasionBase = getActorEvasionTarget(evadingActor);
     const currentReactions = reactionSpend?.previousCount ?? 0;
     const reactionPenalty = currentReactions * -10;
     const fatiguePenalty = getFatigueRollModifier(evadingActor);
@@ -1366,9 +1343,7 @@ export async function mythicRollEvadeIntoCover(
     );
     const evasionTarget = Math.max(
       0,
-      agiValue +
-        tierBonus +
-        evasionMod +
+      evasionBase +
         reactionPenalty +
         grenadePenalty +
         fatiguePenalty +
