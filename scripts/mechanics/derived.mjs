@@ -28,6 +28,46 @@ export function computeCharacteristicModifiers(characteristics = {}) {
   return mods;
 }
 
+export function computeNaturalArmorState({
+  scaffold = {},
+  modifier,
+  isWearingArmor = false
+} = {}) {
+  const hasExplicitModifier = modifier !== undefined;
+  const modifierValue = Math.round(Number(modifier ?? 0) || 0);
+  const rawBaseValue = Number(scaffold?.baseValue ?? 0) || 0;
+  const modifiedBaseValue = rawBaseValue + modifierValue;
+  const resolvedScaffold = hasExplicitModifier
+    ? {
+        ...scaffold,
+        baseValue: Math.max(0, modifiedBaseValue),
+        enabled: Boolean(scaffold?.enabled) || modifiedBaseValue > 0
+      }
+    : scaffold;
+
+  const enabled = Boolean(resolvedScaffold?.enabled);
+  const baseValue = toNonNegativeWhole(resolvedScaffold?.baseValue, 0);
+  const wearingArmor = Boolean(isWearingArmor);
+  const halvedWhenArmored = Boolean(resolvedScaffold?.halvedWhenArmored);
+  const halvedOnHeadshot = Boolean(resolvedScaffold?.halvedOnHeadshot);
+  const effectiveValue = wearingArmor && halvedWhenArmored && enabled
+    ? Math.floor(baseValue / 2)
+    : (enabled ? baseValue : 0);
+
+  return {
+    enabled,
+    baseValue,
+    effectiveValue,
+    headShotValue: effectiveValue > 0 && halvedOnHeadshot
+      ? Math.floor(effectiveValue / 2)
+      : effectiveValue,
+    isWearingArmor: wearingArmor,
+    halvedWhenArmored,
+    halvedOnHeadshot,
+    notes: String(resolvedScaffold?.notes ?? "").trim()
+  };
+}
+
 export function computeFatigueState(systemData = {}, options = {}) {
   const current = toNonNegativeWhole(systemData?.combat?.fatigue?.current, 0);
   const outlierEffects = getOutlierEffectSummary(systemData);
@@ -353,24 +393,11 @@ export function computeCharacterDerivedValues(systemData = {}) {
 
   // Compute Natural Armor DR
   const naturalArmorScaffold = systemData?.flags?.["Halo-Mythic-Foundry-Updated"]?.soldierTypeNaturalArmorScaffold ?? {};
-  const hasNaturalArmor = Boolean(naturalArmorScaffold?.enabled);
-  const naturalArmorBase = toNonNegativeWhole(naturalArmorScaffold?.baseValue, 0);
-  const isHalvedWhenArmored = Boolean(naturalArmorScaffold?.halvedWhenArmored);
   const isWearingArmor = Boolean(systemData?.equipment?.armorName && String(systemData.equipment.armorName ?? "").trim());
-  const naturalArmorValue = isWearingArmor && isHalvedWhenArmored && hasNaturalArmor
-    ? Math.floor(naturalArmorBase / 2)
-    : (hasNaturalArmor ? naturalArmorBase : 0);
-  const naturalArmor = {
-    enabled: hasNaturalArmor,
-    baseValue: naturalArmorBase,
-    effectiveValue: naturalArmorValue,
-    isWearingArmor,
-    halvedOnHeadshot: Boolean(naturalArmorScaffold?.halvedOnHeadshot),
-    headShotValue: naturalArmorValue > 0 && naturalArmorScaffold?.halvedOnHeadshot
-      ? Math.floor(naturalArmorValue / 2)
-      : naturalArmorValue,
-    notes: String(naturalArmorScaffold?.notes ?? "").trim()
-  };
+  const naturalArmor = computeNaturalArmorState({
+    scaffold: naturalArmorScaffold,
+    isWearingArmor
+  });
 
   const naturalHealing = {
     multiplier: Math.max(1, Number(outlierEffects?.vigorous?.multiplier ?? 1) || 1)
