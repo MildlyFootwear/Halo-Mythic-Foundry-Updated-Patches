@@ -152,6 +152,16 @@ export function getCanonicalCharacterSystemData() {
           rLeg: 0
         }
       },
+      naturalArmor: {
+        enabled: false,
+        baseValue: 0,
+        effectiveValue: 0,
+        headShotValue: 0,
+        isWearingArmor: false,
+        halvedWhenArmored: false,
+        halvedOnHeadshot: false,
+        notes: "",
+      },
       reactions: { count: 0 },
       actionEconomy: {
         combatId: "",
