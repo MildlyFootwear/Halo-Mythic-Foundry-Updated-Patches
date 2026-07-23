@@ -39,6 +39,7 @@ import {
 
 import {
   computeCharacteristicModifiers,
+  computeActorNaturalArmorState,
   isGoodFortuneModeEnabled,
 } from "../mechanics/derived.mjs";
 import { getActorEquippedGearMythicCharacteristicModifiers } from "../mechanics/mythic-characteristics.mjs";
@@ -150,6 +151,59 @@ function getUpdatePath(updateData, path, fallback = undefined) {
     return foundry.utils.getProperty(updateData, path);
   }
   return fallback;
+}
+
+const NATURAL_ARMOR_SCAFFOLD_FLAG_PATH =
+  "flags.Halo-Mythic-Foundry-Updated.soldierTypeNaturalArmorScaffold";
+
+function buildNaturalArmorCandidateSystem(actor, changes = {}) {
+  const candidateSystem = foundry.utils.mergeObject(
+    foundry.utils.deepClone(actor?.system ?? {}),
+    foundry.utils.deepClone(changes?.system ?? {}),
+    {
+      inplace: false,
+      insertKeys: true,
+      insertValues: true,
+      overwrite: true,
+      recursive: true,
+    },
+  );
+  for (const [path, value] of Object.entries(changes ?? {})) {
+    if (!path.startsWith("system.")) continue;
+    foundry.utils.setProperty(candidateSystem, path.slice(7), value);
+  }
+  return candidateSystem;
+}
+
+function buildNaturalArmorCandidateFlags(actor, changes = {}) {
+  const candidateFlags = foundry.utils.mergeObject(
+    foundry.utils.deepClone(actor?.flags ?? {}),
+    foundry.utils.deepClone(changes?.flags ?? {}),
+    {
+      inplace: false,
+      insertKeys: true,
+      insertValues: true,
+      overwrite: true,
+      recursive: true,
+    },
+  );
+  if (hasUpdatePath(changes, NATURAL_ARMOR_SCAFFOLD_FLAG_PATH)) {
+    foundry.utils.setProperty(
+      candidateFlags,
+      "Halo-Mythic-Foundry-Updated.soldierTypeNaturalArmorScaffold",
+      getUpdatePath(changes, NATURAL_ARMOR_SCAFFOLD_FLAG_PATH),
+    );
+  }
+  return candidateFlags;
+}
+
+function persistCandidateNaturalArmor(actorType, systemData, flags, target) {
+  if (!["character", "bestiary"].includes(actorType)) return;
+  foundry.utils.setProperty(
+    target,
+    "system.combat.naturalArmor",
+    computeActorNaturalArmorState(actorType, systemData, flags),
+  );
 }
 
 function traceCharacteristicNormalization(actor, data = {}) {
@@ -5920,6 +5974,12 @@ export function registerMythicDocumentAndChatHooks({
         foundry.utils.setProperty(normalized, "mythic.flyCombatActive", true);
       }
       foundry.utils.setProperty(createData, "system", normalized);
+      persistCandidateNaturalArmor(
+        actor.type,
+        normalized,
+        createData.flags ?? actor.flags ?? {},
+        createData,
+      );
       const tokenDefaults = getMythicTokenDefaultsForCharacter(normalized);
       foundry.utils.setProperty(
         createData,
@@ -5939,6 +5999,12 @@ export function registerMythicDocumentAndChatHooks({
     } else if (actor.type === "bestiary") {
       const normalized = normalizeBestiarySystemData(createData.system ?? {});
       foundry.utils.setProperty(createData, "system", normalized);
+      persistCandidateNaturalArmor(
+        actor.type,
+        normalized,
+        createData.flags ?? actor.flags ?? {},
+        createData,
+      );
       const tokenDefaults = getMythicTokenDefaultsForCharacter(normalized);
       foundry.utils.setProperty(
         createData,
@@ -6019,6 +6085,12 @@ export function registerMythicDocumentAndChatHooks({
       if (!actor.isOwner) return;
       if (actor.type === "character") {
         const updates = {};
+        persistCandidateNaturalArmor(
+          actor.type,
+          actor.system ?? {},
+          actor.flags ?? {},
+          updates,
+        );
         const currentImg = String(actor.img ?? "").trim();
         if (!currentImg || currentImg.startsWith("icons/svg/")) {
           foundry.utils.setProperty(
@@ -6137,8 +6209,14 @@ export function registerMythicDocumentAndChatHooks({
         }
 
         const normalized = normalizeBestiarySystemData(actor.system ?? {});
-        const tokenDefaults = getMythicTokenDefaultsForCharacter(normalized);
         foundry.utils.setProperty(updates, "system", normalized);
+        persistCandidateNaturalArmor(
+          actor.type,
+          normalized,
+          actor.flags ?? {},
+          updates,
+        );
+        const tokenDefaults = getMythicTokenDefaultsForCharacter(normalized);
         foundry.utils.setProperty(
           updates,
           "prototypeToken.bar1.attribute",
@@ -6214,6 +6292,13 @@ export function registerMythicDocumentAndChatHooks({
   });
 
   Hooks.on("preUpdateActor", (actor, changes) => {
+    const naturalArmorActor = ["character", "bestiary"].includes(actor.type);
+    const candidateNaturalArmorSystem = naturalArmorActor
+      ? buildNaturalArmorCandidateSystem(actor, changes)
+      : null;
+    const candidateNaturalArmorFlags = naturalArmorActor
+      ? buildNaturalArmorCandidateFlags(actor, changes)
+      : null;
     const touchesCharacterSystem =
       changes.system !== undefined ||
       Object.keys(changes ?? {}).some((key) =>
@@ -6615,6 +6700,21 @@ export function registerMythicDocumentAndChatHooks({
         changes,
         "prototypeToken.displayBars",
         tokenDefaults.displayBars,
+      );
+    }
+
+    if (naturalArmorActor) {
+      const finalCandidateSystem = changes.system
+        ? buildNaturalArmorCandidateSystem(
+            { system: candidateNaturalArmorSystem },
+            { system: changes.system },
+          )
+        : candidateNaturalArmorSystem;
+      persistCandidateNaturalArmor(
+        actor.type,
+        finalCandidateSystem,
+        candidateNaturalArmorFlags,
+        changes,
       );
     }
 

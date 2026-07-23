@@ -68,6 +68,30 @@ export function computeNaturalArmorState({
   };
 }
 
+export function computeActorNaturalArmorState(
+  actorType,
+  systemData = {},
+  flags = {},
+) {
+  const scaffold =
+    flags?.["Halo-Mythic-Foundry-Updated"]
+      ?.soldierTypeNaturalArmorScaffold ?? {};
+  const modernArmorId =
+    actorType === "bestiary"
+      ? systemData?.bestiary?.equippedArmorId
+      : systemData?.equipment?.equipped?.armorId;
+  const isWearingArmor = Boolean(
+    String(modernArmorId ?? "").trim() ||
+      String(systemData?.equipment?.armorName ?? "").trim(),
+  );
+
+  return computeNaturalArmorState({
+    scaffold,
+    modifier: systemData?.mythic?.naturalArmorModifier ?? 0,
+    isWearingArmor,
+  });
+}
+
 export function computeFatigueState(systemData = {}, options = {}) {
   const current = toNonNegativeWhole(systemData?.combat?.fatigue?.current, 0);
   const outlierEffects = getOutlierEffectSummary(systemData);
