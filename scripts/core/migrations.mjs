@@ -830,9 +830,10 @@ export async function runWorldTraitFlavorMigrationV16({ dryRun = false } = {}) {
   for (const item of getWorldTraitItems()) {
     result.scannedTraitItems += 1;
     try {
+      const effectDocuments = Array.from(item.effects ?? []);
       const cleanup = stripTraitCharacteristicEffectsFromItemData({
         type: "trait",
-        effects: Array.from(item.effects ?? [], (effect) => (
+        effects: effectDocuments.map((effect) => (
           typeof effect?.toObject === "function"
             ? effect.toObject()
             : foundry.utils.deepClone(effect ?? {})
@@ -856,16 +857,58 @@ export async function runWorldTraitFlavorMigrationV16({ dryRun = false } = {}) {
       });
 
       if (!result.dryRun) {
-        await item.update(
-          { effects: cleanup.effects },
-          {
-            render: false,
-            diff: false,
-            recursive: false,
-            mythicTraitFlavorMigrationV16: true
+        const effectUpdates = [];
+        const effectIdsToDelete = [];
+        for (const effect of effectDocuments) {
+          const sourceChanges = Array.from(effect?.changes ?? [], (change) => (
+            typeof change?.toObject === "function"
+              ? change.toObject()
+              : foundry.utils.deepClone(change ?? {})
+          ));
+          const changes = sourceChanges.filter((change) => {
+            const key = String(change?.key ?? "").trim();
+            return !key.startsWith("system.characteristics.");
+          });
+          if (changes.length === sourceChanges.length) continue;
+
+          const effectId = String(effect?.id ?? effect?._id ?? "").trim();
+          if (!effectId) {
+            throw new Error("Trait characteristic effect is missing an embedded document ID.");
           }
-        );
-        result.updatedItems += 1;
+          if (changes.length) {
+            effectUpdates.push({ _id: effectId, changes });
+          } else {
+            effectIdsToDelete.push(effectId);
+          }
+        }
+
+        const updateOptions = {
+          render: false,
+          mythicTraitFlavorMigrationV16: true
+        };
+        if (effectUpdates.length) {
+          if (typeof item.updateEmbeddedDocuments !== "function") {
+            throw new Error("Trait item cannot update embedded Active Effects.");
+          }
+          await item.updateEmbeddedDocuments(
+            "ActiveEffect",
+            effectUpdates,
+            updateOptions
+          );
+        }
+        if (effectIdsToDelete.length) {
+          if (typeof item.deleteEmbeddedDocuments !== "function") {
+            throw new Error("Trait item cannot delete embedded Active Effects.");
+          }
+          await item.deleteEmbeddedDocuments(
+            "ActiveEffect",
+            effectIdsToDelete,
+            updateOptions
+          );
+        }
+        if (effectUpdates.length || effectIdsToDelete.length) {
+          result.updatedItems += 1;
+        }
       }
     } catch (error) {
       result.failedItems += 1;
