@@ -36,6 +36,11 @@ import {
   getCharacterManualMythicCharacteristicModifiers,
   getCharacterOutlierMythicCharacteristicModifiers
 } from "../mechanics/mythic-characteristics.mjs";
+import {
+  computeActorNaturalArmorState,
+  computeCharacteristicModifiers
+} from "../mechanics/derived.mjs";
+import { prepareCharacterSystemForNormalization } from "../mechanics/final-characteristics.mjs";
 
 const MYTHIC_SYSTEM_ID = "Halo-Mythic-Foundry-Updated";
 const MYTHIC_DUPLICATE_CLEANUP_DOCUMENT_NAMES = Object.freeze(new Set(["Actor", "Item"]));
@@ -516,11 +521,18 @@ function resolveCharacterBaseMythicCharacteristics(actor, normalizedSystem, look
   }
 
   const currentTotals = coerceMythicCharacteristicMap(actor?.system?.mythic?.characteristics ?? {}, { allowNegative: false });
+  const manual = getCharacterManualMythicCharacteristicModifiers(normalizedSystem);
   const equipment = getActorEquippedGearMythicCharacteristicModifiers(actor, normalizedSystem?.equipment?.equipped ?? {});
   const outliers = getCharacterOutlierMythicCharacteristicModifiers(normalizedSystem);
   return Object.fromEntries(["str", "tou", "agi"].map((key) => [
     key,
-    Math.max(0, Number(currentTotals?.[key] ?? 0) - Number(equipment?.[key] ?? 0) - Number(outliers?.[key] ?? 0))
+    Math.max(
+      0,
+      Number(currentTotals?.[key] ?? 0)
+        - Number(manual?.[key] ?? 0)
+        - Number(equipment?.[key] ?? 0)
+        - Number(outliers?.[key] ?? 0)
+    )
   ]));
 }
 
@@ -671,6 +683,113 @@ export async function runWorldSchemaMigration() {
     embeddedItemMigrations,
     totalMigrations: actorMigrations + itemMigrations + embeddedItemMigrations
   };
+}
+
+const CANONICAL_WORLD_ACTOR_TYPES = Object.freeze(new Set(["character", "bestiary"]));
+const CANONICAL_WORLD_GROUPS = Object.freeze([
+  "characteristics",
+  "characteristicModifiers",
+  "mythic.characteristics",
+  "combat.naturalArmor"
+]);
+
+function buildCanonicalV15CharacterSystem(actor) {
+  const source = foundry.utils.deepClone(actor.system ?? {});
+  const prepared = prepareCharacterSystemForNormalization(actor, source, {
+    traceLabel: "world migration 15"
+  });
+  const normalized = normalizeCharacterSystemData(prepared.systemData, {
+    preservePreparedCharacteristics: true
+  });
+
+  // Unmanaged characters have no authoritative builder result. Preserve their
+  // valid stored final totals and derive modifiers from those stored totals.
+  if (!prepared.applied) {
+    normalized.characteristics = Object.fromEntries(
+      Object.keys(normalized.characteristics ?? {}).map((key) => {
+        const stored = Number(source?.characteristics?.[key]);
+        return [key, Number.isFinite(stored) && stored >= 0
+          ? stored
+          : Number(normalized.characteristics?.[key] ?? 0)];
+      })
+    );
+  }
+  normalized.characteristicModifiers = computeCharacteristicModifiers(normalized.characteristics);
+  return repairCharacterMythicCharacteristics(actor, normalized, { byCanonicalId: new Map(), byName: new Map() });
+}
+
+function getCanonicalV15System(actor) {
+  const normalized = actor.type === "character"
+    ? buildCanonicalV15CharacterSystem(actor)
+    : normalizeBestiarySystemData(actor.system ?? {});
+  const nextSystem = foundry.utils.deepClone(normalized);
+  nextSystem.combat ??= {};
+  nextSystem.combat.naturalArmor = computeActorNaturalArmorState(
+    actor.type,
+    nextSystem,
+    actor.flags ?? {}
+  );
+  return nextSystem;
+}
+
+export async function runWorldCanonicalMigrationV15({ dryRun = false } = {}) {
+  const result = {
+    dryRun: dryRun === true,
+    scannedActors: 0,
+    supportedActors: 0,
+    skippedActors: 0,
+    changedActors: 0,
+    unchangedActors: 0,
+    updatedActors: 0,
+    failedActors: 0,
+    changedGroups: Object.fromEntries(CANONICAL_WORLD_GROUPS.map((path) => [path, 0])),
+    failures: []
+  };
+
+  for (const actor of game.actors ?? []) {
+    result.scannedActors += 1;
+    if (!CANONICAL_WORLD_ACTOR_TYPES.has(actor.type)) {
+      result.skippedActors += 1;
+      continue;
+    }
+    result.supportedActors += 1;
+
+    try {
+      const canonical = getCanonicalV15System(actor);
+      const updates = {};
+      for (const path of CANONICAL_WORLD_GROUPS) {
+        const currentValue = foundry.utils.getProperty(actor.system ?? {}, path);
+        const canonicalValue = foundry.utils.getProperty(canonical, path);
+        if (foundry.utils.isEmpty(foundry.utils.diffObject(currentValue ?? {}, canonicalValue ?? {}))) continue;
+        updates[`system.${path}`] = foundry.utils.deepClone(canonicalValue);
+        result.changedGroups[path] += 1;
+      }
+
+      if (!Object.keys(updates).length) {
+        result.unchangedActors += 1;
+        continue;
+      }
+      result.changedActors += 1;
+      if (!result.dryRun) {
+        await actor.update(updates, {
+          render: false,
+          diff: false,
+          mythicCanonicalMigrationV15: true
+        });
+        result.updatedActors += 1;
+      }
+    } catch (error) {
+      result.failedActors += 1;
+      result.failures.push({
+        actorId: String(actor?.id ?? ""),
+        actorName: String(actor?.name ?? ""),
+        actorType: String(actor?.type ?? ""),
+        message: String(error?.message ?? error)
+      });
+    }
+  }
+
+  return result;
 }
 
 export function isMythicOwnedItemPack(pack) {
@@ -1302,6 +1421,17 @@ export async function maybeRunWorldMigration(options = {}) {
     return { skipped: true, reason: "already-migrated", version: storedVersion };
   }
 
+  // Canonical migration 15 requires an explicit backup and dry-run approval.
+  // The ordinary startup hook intentionally does not provide this option.
+  if (options?.allowCanonicalMigrationV15 !== true) {
+    return {
+      skipped: true,
+      reason: "canonical-migration-approval-required",
+      previousVersion: storedVersion,
+      version: MYTHIC_WORLD_MIGRATION_VERSION
+    };
+  }
+
   const silent = options?.silent === true;
   if (!silent) {
     ui.notifications?.info(
@@ -1310,7 +1440,12 @@ export async function maybeRunWorldMigration(options = {}) {
   }
 
   try {
-    const result = await runWorldSchemaMigration();
+    const legacyResult = storedVersion < 14 ? await runWorldSchemaMigration() : null;
+    const result = await runWorldCanonicalMigrationV15({ dryRun: false });
+    if (result.failedActors > 0) {
+      console.error("[mythic-system] World migration 15 left the migration version unchanged because required actors failed.", result);
+      return { failed: true, previousVersion: storedVersion, legacyResult, ...result };
+    }
     await game.settings.set(
       "Halo-Mythic-Foundry-Updated",
       MYTHIC_WORLD_MIGRATION_SETTING_KEY,
@@ -1318,15 +1453,15 @@ export async function maybeRunWorldMigration(options = {}) {
     );
 
     console.log(
-      `[mythic-system] World migration ${storedVersion} -> ${MYTHIC_WORLD_MIGRATION_VERSION} complete: ${result.actorMigrations} actors, ${result.embeddedItemMigrations} actor items, ${result.itemMigrations} world items.`
+      `[mythic-system] World migration ${storedVersion} -> ${MYTHIC_WORLD_MIGRATION_VERSION} complete: ${result.updatedActors} actors updated; ${result.unchangedActors} unchanged; ${result.skippedActors} unsupported actors skipped.`
     );
 
     if (!silent) {
       ui.notifications?.info(
-        `Halo Mythic migration complete: ${result.actorMigrations} actors, ${result.embeddedItemMigrations} actor items, and ${result.itemMigrations} world items updated.`
+        `Halo Mythic migration complete: ${result.updatedActors} actors updated and ${result.unchangedActors} already canonical.`
       );
     }
-    return { skipped: false, previousVersion: storedVersion, version: MYTHIC_WORLD_MIGRATION_VERSION, ...result };
+    return { skipped: false, previousVersion: storedVersion, version: MYTHIC_WORLD_MIGRATION_VERSION, legacyResult, ...result };
   } catch (error) {
     console.error("[mythic-system] World migration failed.", error);
     if (!silent) ui.notifications?.error("Halo Mythic migration failed. Check browser console for details.");

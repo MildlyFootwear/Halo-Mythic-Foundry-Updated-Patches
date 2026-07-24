@@ -6291,7 +6291,8 @@ export function registerMythicDocumentAndChatHooks({
     }
   });
 
-  Hooks.on("preUpdateActor", (actor, changes) => {
+  Hooks.on("preUpdateActor", (actor, changes, options) => {
+    if (options?.mythicCanonicalMigrationV15 === true) return;
     const naturalArmorActor = ["character", "bestiary"].includes(actor.type);
     const candidateNaturalArmorSystem = naturalArmorActor
       ? buildNaturalArmorCandidateSystem(actor, changes)
