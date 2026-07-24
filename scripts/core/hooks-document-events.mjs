@@ -29,6 +29,7 @@ import {
   normalizeEnvironmentSystemData,
   normalizeLifestyleSystemData,
 } from "../data/normalization.mjs";
+import { stripTraitCharacteristicEffectsFromItemData } from "../data/content-loading.mjs";
 
 import {
   resolveStartingXpForNewCharacter,
@@ -5749,6 +5750,11 @@ export function registerMythicDocumentAndChatHooks({
         initialName,
       );
       foundry.utils.setProperty(createData, "system", normalized);
+      const characteristicStripped = stripTraitCharacteristicEffectsFromItemData({
+        ...createData,
+        type: item.type,
+      });
+      createData.effects = characteristicStripped.effects;
       stripBerserkerAutoEffectsFromItemData(createData);
       const currentImg = createData.img ?? item.img ?? "";
       if (
@@ -5841,6 +5847,20 @@ export function registerMythicDocumentAndChatHooks({
   Hooks.on("preUpdateItem", (item, changes) => {
     const nextName = String(changes.name ?? item.name ?? "").trim();
     const hasSystemChanges = changes.system !== undefined;
+    if (item.type === "trait" && Array.isArray(changes.effects)) {
+      const characteristicStripped = stripTraitCharacteristicEffectsFromItemData({
+        ...changes,
+        type: item.type,
+        name: nextName,
+      });
+      const stripped = stripBerserkerAutoEffectsFromItemData({
+        ...changes,
+        type: item.type,
+        name: nextName,
+        effects: characteristicStripped.effects,
+      });
+      changes.effects = stripped.effects;
+    }
 
     if (!hasSystemChanges) {
       if (changes.name === undefined) return;
@@ -5858,14 +5878,6 @@ export function registerMythicDocumentAndChatHooks({
       }
       if (item.type === "trait") {
         changes.system = normalizeTraitSystemData(item.system ?? {}, nextName);
-        if (Array.isArray(changes.effects)) {
-          const stripped = stripBerserkerAutoEffectsFromItemData({
-            ...changes,
-            type: item.type,
-            name: nextName,
-          });
-          changes.effects = stripped.effects;
-        }
         return;
       }
       if (item.type === "education") {
@@ -5925,14 +5937,6 @@ export function registerMythicDocumentAndChatHooks({
 
     if (item.type === "trait") {
       changes.system = normalizeTraitSystemData(nextSystem, nextName);
-      if (Array.isArray(changes.effects)) {
-        const stripped = stripBerserkerAutoEffectsFromItemData({
-          ...changes,
-          type: item.type,
-          name: nextName,
-        });
-        changes.effects = stripped.effects;
-      }
       return;
     }
 
@@ -5964,6 +5968,31 @@ export function registerMythicDocumentAndChatHooks({
     if (item.type === "gear") {
       changes.system = normalizeGearSystemData(nextSystem, nextName);
     }
+  });
+
+  Hooks.on("preCreateActiveEffect", (effect, createData) => {
+    const item = effect?.parent;
+    if (item?.documentName !== "Item" || item.type !== "trait") return;
+    const stripped = stripTraitCharacteristicEffectsFromItemData({
+      type: "trait",
+      effects: [createData],
+    });
+    if (!stripped.effects.length) return false;
+    createData.changes = stripped.effects[0].changes;
+  });
+
+  Hooks.on("preUpdateActiveEffect", (effect, changes) => {
+    const item = effect?.parent;
+    if (
+      item?.documentName !== "Item" ||
+      item.type !== "trait" ||
+      !Array.isArray(changes?.changes)
+    ) return;
+    const stripped = stripTraitCharacteristicEffectsFromItemData({
+      type: "trait",
+      effects: [{ changes: changes.changes }],
+    });
+    changes.changes = stripped.effects[0]?.changes ?? [];
   });
 
   Hooks.on("preCreateActor", (actor, createData) => {

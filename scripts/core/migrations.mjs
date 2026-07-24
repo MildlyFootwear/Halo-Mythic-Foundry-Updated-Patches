@@ -11,7 +11,11 @@ import {
   normalizeSoldierTypeSystemData,
   normalizeSupportedItemSystemData
 } from "../data/normalization.mjs";
-import { loadMythicAmmoTypeDefinitions, loadMythicAmmoTypeDefinitionsFromJson } from "../data/content-loading.mjs";
+import {
+  loadMythicAmmoTypeDefinitions,
+  loadMythicAmmoTypeDefinitionsFromJson,
+  stripTraitCharacteristicEffectsFromItemData
+} from "../data/content-loading.mjs";
 import { coerceMigrationVersion } from "../utils/helpers.mjs";
 import { invalidateAndRerenderCompendiums } from "../reference/compendium-refresh-utils.mjs";
 import { loadReferenceSoldierTypeItems } from "../reference/compendium-management.mjs";
@@ -694,7 +698,7 @@ const CANONICAL_WORLD_GROUPS = Object.freeze([
 ]);
 
 function buildCanonicalV15CharacterSystem(actor) {
-  const source = foundry.utils.deepClone(actor.system ?? {});
+  const source = foundry.utils.deepClone(actor?._source?.system ?? actor.system ?? {});
   const prepared = prepareCharacterSystemForNormalization(actor, source, {
     traceLabel: "world migration 15"
   });
@@ -719,9 +723,10 @@ function buildCanonicalV15CharacterSystem(actor) {
 }
 
 function getCanonicalV15System(actor) {
+  const storedSystem = actor?._source?.system ?? actor.system ?? {};
   const normalized = actor.type === "character"
     ? buildCanonicalV15CharacterSystem(actor)
-    : normalizeBestiarySystemData(actor.system ?? {});
+    : normalizeBestiarySystemData(storedSystem);
   const nextSystem = foundry.utils.deepClone(normalized);
   nextSystem.combat ??= {};
   nextSystem.combat.naturalArmor = computeActorNaturalArmorState(
@@ -758,7 +763,10 @@ export async function runWorldCanonicalMigrationV15({ dryRun = false } = {}) {
       const canonical = getCanonicalV15System(actor);
       const updates = {};
       for (const path of CANONICAL_WORLD_GROUPS) {
-        const currentValue = foundry.utils.getProperty(actor.system ?? {}, path);
+        const currentValue = foundry.utils.getProperty(
+          actor?._source?.system ?? actor.system ?? {},
+          path
+        );
         const canonicalValue = foundry.utils.getProperty(canonical, path);
         if (foundry.utils.isEmpty(foundry.utils.diffObject(currentValue ?? {}, canonicalValue ?? {}))) continue;
         updates[`system.${path}`] = foundry.utils.deepClone(canonicalValue);
@@ -784,6 +792,88 @@ export async function runWorldCanonicalMigrationV15({ dryRun = false } = {}) {
         actorId: String(actor?.id ?? ""),
         actorName: String(actor?.name ?? ""),
         actorType: String(actor?.type ?? ""),
+        message: String(error?.message ?? error)
+      });
+    }
+  }
+
+  return result;
+}
+
+function getWorldTraitItems() {
+  const items = [];
+  for (const item of game.items ?? []) {
+    if (String(item?.type ?? "").trim().toLowerCase() === "trait") items.push(item);
+  }
+  for (const actor of game.actors ?? []) {
+    for (const item of actor?.items ?? []) {
+      if (String(item?.type ?? "").trim().toLowerCase() === "trait") items.push(item);
+    }
+  }
+  return items;
+}
+
+export async function runWorldTraitFlavorMigrationV16({ dryRun = false } = {}) {
+  const result = {
+    dryRun: dryRun === true,
+    scannedTraitItems: 0,
+    changedItems: 0,
+    unchangedItems: 0,
+    updatedItems: 0,
+    removedEffects: 0,
+    removedChanges: 0,
+    failedItems: 0,
+    changes: [],
+    failures: []
+  };
+
+  for (const item of getWorldTraitItems()) {
+    result.scannedTraitItems += 1;
+    try {
+      const cleanup = stripTraitCharacteristicEffectsFromItemData({
+        type: "trait",
+        effects: Array.from(item.effects ?? [], (effect) => (
+          typeof effect?.toObject === "function"
+            ? effect.toObject()
+            : foundry.utils.deepClone(effect ?? {})
+        ))
+      });
+      if (!cleanup.changed) {
+        result.unchangedItems += 1;
+        continue;
+      }
+
+      result.changedItems += 1;
+      result.removedEffects += cleanup.removedEffects;
+      result.removedChanges += cleanup.removedChanges;
+      result.changes.push({
+        actorId: String(item?.parent?.documentName === "Actor" ? item.parent.id ?? "" : ""),
+        actorName: String(item?.parent?.documentName === "Actor" ? item.parent.name ?? "" : ""),
+        itemId: String(item?.id ?? ""),
+        itemName: String(item?.name ?? ""),
+        removedEffects: cleanup.removedEffects,
+        removedChanges: cleanup.removedChanges
+      });
+
+      if (!result.dryRun) {
+        await item.update(
+          { effects: cleanup.effects },
+          {
+            render: false,
+            diff: false,
+            recursive: false,
+            mythicTraitFlavorMigrationV16: true
+          }
+        );
+        result.updatedItems += 1;
+      }
+    } catch (error) {
+      result.failedItems += 1;
+      result.failures.push({
+        actorId: String(item?.parent?.documentName === "Actor" ? item.parent.id ?? "" : ""),
+        actorName: String(item?.parent?.documentName === "Actor" ? item.parent.name ?? "" : ""),
+        itemId: String(item?.id ?? ""),
+        itemName: String(item?.name ?? ""),
         message: String(error?.message ?? error)
       });
     }
@@ -1421,12 +1511,20 @@ export async function maybeRunWorldMigration(options = {}) {
     return { skipped: true, reason: "already-migrated", version: storedVersion };
   }
 
-  // Canonical migration 15 requires an explicit backup and dry-run approval.
-  // The ordinary startup hook intentionally does not provide this option.
-  if (options?.allowCanonicalMigrationV15 !== true) {
+  // Destructive world migrations require explicit backup and dry-run approval.
+  // The ordinary startup hook intentionally does not provide these options.
+  if (storedVersion < 15 && options?.allowCanonicalMigrationV15 !== true) {
     return {
       skipped: true,
       reason: "canonical-migration-approval-required",
+      previousVersion: storedVersion,
+      version: MYTHIC_WORLD_MIGRATION_VERSION
+    };
+  }
+  if (storedVersion < 16 && options?.allowTraitFlavorMigrationV16 !== true) {
+    return {
+      skipped: true,
+      reason: "trait-flavor-migration-approval-required",
       previousVersion: storedVersion,
       version: MYTHIC_WORLD_MIGRATION_VERSION
     };
@@ -1441,10 +1539,18 @@ export async function maybeRunWorldMigration(options = {}) {
 
   try {
     const legacyResult = storedVersion < 14 ? await runWorldSchemaMigration() : null;
+    const traitResult = await runWorldTraitFlavorMigrationV16({ dryRun: false });
+    if (traitResult.failedItems > 0) {
+      console.error(
+        "[mythic-system] World migration 16 left the migration version unchanged because trait cleanup failed.",
+        traitResult
+      );
+      return { failed: true, previousVersion: storedVersion, legacyResult, traitResult };
+    }
     const result = await runWorldCanonicalMigrationV15({ dryRun: false });
     if (result.failedActors > 0) {
-      console.error("[mythic-system] World migration 15 left the migration version unchanged because required actors failed.", result);
-      return { failed: true, previousVersion: storedVersion, legacyResult, ...result };
+      console.error("[mythic-system] World migration 16 left the migration version unchanged because required actors failed.", result);
+      return { failed: true, previousVersion: storedVersion, legacyResult, traitResult, ...result };
     }
     await game.settings.set(
       "Halo-Mythic-Foundry-Updated",
@@ -1453,15 +1559,22 @@ export async function maybeRunWorldMigration(options = {}) {
     );
 
     console.log(
-      `[mythic-system] World migration ${storedVersion} -> ${MYTHIC_WORLD_MIGRATION_VERSION} complete: ${result.updatedActors} actors updated; ${result.unchangedActors} unchanged; ${result.skippedActors} unsupported actors skipped.`
+      `[mythic-system] World migration ${storedVersion} -> ${MYTHIC_WORLD_MIGRATION_VERSION} complete: ${traitResult.updatedItems} trait items cleaned; ${result.updatedActors} actors updated; ${result.unchangedActors} unchanged; ${result.skippedActors} unsupported actors skipped.`
     );
 
     if (!silent) {
       ui.notifications?.info(
-        `Halo Mythic migration complete: ${result.updatedActors} actors updated and ${result.unchangedActors} already canonical.`
+        `Halo Mythic migration complete: ${traitResult.updatedItems} trait items cleaned, ${result.updatedActors} actors updated, and ${result.unchangedActors} already canonical.`
       );
     }
-    return { skipped: false, previousVersion: storedVersion, version: MYTHIC_WORLD_MIGRATION_VERSION, legacyResult, ...result };
+    return {
+      skipped: false,
+      previousVersion: storedVersion,
+      version: MYTHIC_WORLD_MIGRATION_VERSION,
+      legacyResult,
+      traitResult,
+      ...result
+    };
   } catch (error) {
     console.error("[mythic-system] World migration failed.", error);
     if (!silent) ui.notifications?.error("Halo Mythic migration failed. Check browser console for details.");
