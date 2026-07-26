@@ -35,6 +35,18 @@ export function getCanonicalCharacterSystemData() {
       cha: 0,
       ldr: 0
     },
+    characteristicModifiers: {
+      str: 0,
+      tou: 0,
+      agi: 0,
+      wfm: 0,
+      wfr: 0,
+      int: 0,
+      per: 0,
+      crg: 0,
+      cha: 0,
+      ldr: 0
+    },
     charBuilder: {
       managed: false,
       lowerTierUnlockEnabled: false,
@@ -139,6 +151,16 @@ export function getCanonicalCharacterSystemData() {
           lLeg: 0,
           rLeg: 0
         }
+      },
+      naturalArmor: {
+        enabled: false,
+        baseValue: 0,
+        effectiveValue: 0,
+        headShotValue: 0,
+        isWearingArmor: false,
+        halvedWhenArmored: false,
+        halvedOnHeadshot: false,
+        notes: "",
       },
       reactions: { count: 0 },
       actionEconomy: {

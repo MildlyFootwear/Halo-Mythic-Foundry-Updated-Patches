@@ -1,5 +1,4 @@
-import { normalizeSkillsData } from "../data/normalization.mjs";
-import { computeCharacteristicModifiers, computeCharacterDerivedValues, computeFatigueState } from "../mechanics/derived.mjs";
+import { computeCharacteristicModifiers, computeFatigueState } from "../mechanics/derived.mjs";
 import { prepareCharacterSystemForNormalization } from "../mechanics/final-characteristics.mjs";
 import { computeAttackDOS } from "../mechanics/combat.mjs";
 import { spendActorReaction } from "../mechanics/action-economy.mjs";
@@ -10,10 +9,14 @@ import {
   getSplatterHitLocationCount,
   resolveSplatterHitLocation
 } from "../mechanics/vehicle-hazards.mjs";
-import { getSkillTierBonus } from "../reference/ref-utils.mjs";
 import { toNonNegativeWhole } from "../utils/helpers.mjs";
 import { buildRollTooltipHtml } from "../ui/roll-tooltips.mjs";
 import { mythicApplyWoundDamage } from "./chat-combat.mjs";
+import { resolveActorDrRows } from "../mechanics/damage-resistance.mjs";
+import {
+  getActorEvasionTarget,
+  getFinalCharacteristic,
+} from "../mechanics/source-of-truth.mjs";
 
 const SYSTEM_ID = "Halo-Mythic-Foundry-Updated";
 
@@ -61,7 +64,7 @@ function formatDegree(value = 0) {
 }
 
 function getActorCharacteristic(actor, key = "str") {
-  return toNonNegativeWhole(getPreparedActorSystem(actor)?.characteristics?.[key], 0);
+  return Math.max(0, getFinalCharacteristic(actor, key));
 }
 
 function getTargetRefsFromCanvas(vehicleActorId = "") {
@@ -122,17 +125,16 @@ function canUserRollSplatterForTargets(splatterData = {}) {
 }
 
 function getLowestDrEntry(actor) {
-  const armor = actor?.system?.combat?.dr?.armor ?? {};
-  const derived = computeCharacterDerivedValues(getPreparedActorSystem(actor));
-  const toughnessDr = Math.max(0, Number(derived?.touCombined ?? 0) || 0);
-  const naturalArmorBody = Math.max(0, Number(derived?.naturalArmor?.effectiveValue ?? 0) || 0);
-  const naturalArmorHead = Math.max(0, Number(derived?.naturalArmor?.headShotValue ?? derived?.naturalArmor?.effectiveValue ?? 0) || 0);
+  const drRows = resolveActorDrRows(actor);
   return ARMOR_KEYS
     .map((entry) => ({
       ...entry,
-      armor: toNonNegativeWhole(armor?.[entry.key], 0),
-      naturalArmor: entry.key === "head" ? naturalArmorHead : naturalArmorBody,
-      toughnessDr
+      armor: toNonNegativeWhole(drRows?.[entry.key]?.armorValue, 0),
+      naturalArmor: toNonNegativeWhole(
+        drRows?.[entry.key]?.naturalArmorValue,
+        0,
+      ),
+      toughnessDr: toNonNegativeWhole(drRows?.[entry.key]?.touForDR, 0),
     }))
     .map((entry) => ({
       ...entry,
@@ -361,15 +363,12 @@ export async function mythicRollVehicleSplatterEvasion(messageId, splatterData =
       combat: game.combat
     });
     const evadingActor = reactionSpend?.actor ?? targetActor;
-    const skillsNorm = normalizeSkillsData(evadingActor.system?.skills);
-    const evasionSkill = skillsNorm.base?.evasion ?? {};
-    const tierBonus = getSkillTierBonus(evasionSkill.tier ?? "untrained", evasionSkill.category ?? "basic");
+    const evasionBase = getActorEvasionTarget(evadingActor);
     const agility = getActorCharacteristic(evadingActor, "agi");
-    const evasionMod = Number(evasionSkill.modifier ?? 0) || 0;
     const reactionCount = reactionSpend?.previousCount ?? 0;
     const reactionPenalty = reactionCount * -10;
     const fatiguePenalty = getFatigueRollModifier(evadingActor);
-    const targetNumber = Math.max(0, Math.floor(agility + tierBonus + evasionMod + reactionPenalty + miscModifier + fatiguePenalty));
+    const targetNumber = Math.max(0, Math.floor(evasionBase + reactionPenalty + miscModifier + fatiguePenalty));
     const roll = await new Roll("1d100").evaluate();
     rolls.push(roll);
     const dosValue = computeAttackDOS(targetNumber, Number(roll.total ?? 0));
@@ -381,7 +380,7 @@ export async function mythicRollVehicleSplatterEvasion(messageId, splatterData =
       dosValue,
       degreeText: formatDegree(dosValue),
       agility,
-      evasionBonus: tierBonus + evasionMod,
+      evasionBonus: evasionBase - agility,
       reactionPenalty,
       miscModifier: miscModifier + fatiguePenalty
     });

@@ -16,6 +16,11 @@ import {
   normalizeActorCharacterSystemData,
   prepareCharacterSystemForNormalization,
 } from "./final-characteristics.mjs";
+import {
+  getCharacteristicModifier,
+  getFinalMythicCharacteristic,
+  getNaturalArmorState,
+} from "./source-of-truth.mjs";
 
 const MYTHIC_SYSTEM_SCOPE = "Halo-Mythic-Foundry-Updated";
 const CHARACTER_DR_KEYS = Object.freeze([
@@ -150,48 +155,16 @@ export function buildActorDerivedSystemData(actor, systemData = null) {
 }
 
 export function resolveActorDrRows(actor, options = {}) {
-  const systemData = getActorDrSystemData(actor, options?.systemData);
-  const derived =
-    options?.precomputed ??
-    options?.derived ??
-    computeCharacterDerivedValues(
-      buildActorDerivedSystemData(actor, systemData),
-    );
+  const systemData = actor?.system ?? {};
   const armor = systemData?.combat?.dr?.armor ?? {};
-  const finalTou = Number(systemData?.characteristics?.tou ?? 0);
-  const touModifier = Math.max(
-    0,
-    Number.isFinite(finalTou)
-      ? Math.floor(finalTou / 10)
-      : Number(
-          options?.characteristicModifiers?.tou ?? derived?.modifiers?.tou ?? 0,
-        ),
-  );
-
-  const rawActorSystem = actor?.system ?? {};
-
-  const mythicTouCandidates = [
-    rawActorSystem?.mythic?.baseCharacteristics?.tou,
-    rawActorSystem?.mythic?.characteristics?.tou,
-    rawActorSystem?.mythic?.tou,
-  ];
-
-  const mythicTou = Math.max(
-    0,
-    Math.floor(
-      Number(
-        mythicTouCandidates.find((value) => Number.isFinite(Number(value))) ??
-          0,
-      ),
-    ),
-  );
+  const touModifier = Math.max(0, getCharacteristicModifier(actor, "tou"));
+  const mythicTou = Math.max(0, getFinalMythicCharacteristic(actor, "tou"));
 
   const touCombined = Math.max(0, touModifier + mythicTou);
 
-  const naturalArmorBody = asWhole(derived?.naturalArmor?.effectiveValue);
-  const naturalArmorHead = Boolean(derived?.naturalArmor?.halvedOnHeadshot)
-    ? asWhole(derived?.naturalArmor?.headShotValue)
-    : naturalArmorBody;
+  const naturalArmor = getNaturalArmorState(actor);
+  const naturalArmorBody = asWhole(naturalArmor.effectiveValue);
+  const naturalArmorHead = asWhole(naturalArmor.headShotValue);
 
   const withArmor = (key) => {
     const armorValue = asWhole(armor?.[key]);
@@ -244,7 +217,7 @@ export function resolveActorDrComponents(actor, drKey = "", options = {}) {
   const sourceRow = rows[key] ?? rows.base;
   const isHeadshot = Boolean(options?.isHeadshot);
   const outlierEffects = getOutlierEffectSummary(
-    options?.systemData ?? actor?.system ?? {},
+    actor?.system ?? {},
   );
   const ignoresTouModifierOnHead = isHeadshot && key === "head";
   const retainedTouModifierOnHead =

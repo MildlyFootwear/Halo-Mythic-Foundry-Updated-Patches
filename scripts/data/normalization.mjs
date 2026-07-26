@@ -39,7 +39,10 @@ import {
   normalizeTrainingData,
 } from "../mechanics/training.mjs";
 import { buildSkillRankDefaults } from "../mechanics/skills.mjs";
-import { computeCharacterDerivedValues } from "../mechanics/derived.mjs";
+import {
+  computeCharacteristicModifiers,
+  computeCharacterDerivedValues,
+} from "../mechanics/derived.mjs";
 import {
   coerceMythicCharacteristicMap,
   getCharacterEffectiveMythicCharacteristics,
@@ -1803,9 +1806,13 @@ export {
 
 // ─── Character Normalization ─────────────────────────────────────────────────
 
-export function normalizeCharacterSystemData(systemData) {
+export function normalizeCharacterSystemData(
+  systemData,
+  { preservePreparedCharacteristics = false } = {},
+) {
   try {
     if (
+      !preservePreparedCharacteristics &&
       systemData &&
       typeof systemData === "object" &&
       _normCache.character.has(systemData)
@@ -1943,7 +1950,11 @@ export function normalizeCharacterSystemData(systemData) {
     : 0;
 
   try {
-    if (systemData && typeof systemData === "object")
+    if (
+      !preservePreparedCharacteristics &&
+      systemData &&
+      typeof systemData === "object"
+    )
       _normCache.character.set(systemData, merged);
   } catch (_err) {
     // ignore
@@ -2851,7 +2862,7 @@ export function normalizeCharacterSystemData(systemData) {
     : 100;
 
   // When managed, compute characteristics from builder rows (background added separately via creationPath)
-  if (merged.charBuilder.managed) {
+  if (merged.charBuilder.managed && !preservePreparedCharacteristics) {
     for (const key of MYTHIC_CHARACTERISTIC_KEYS) {
       const total =
         (merged.charBuilder.soldierTypeRow[key] ?? 0) +
@@ -3283,6 +3294,9 @@ export function normalizeBestiarySystemData(systemData) {
   merged.combat.luck.current = finalLuckCurrent;
 
   const recalculated = normalizeCharacterSystemData(merged);
+  recalculated.characteristicModifiers = computeCharacteristicModifiers(
+    recalculated.characteristics,
+  );
   recalculated.bestiary = merged.bestiary;
   recalculated.mythic.characteristics = foundry.utils.deepClone(
     merged.mythic.characteristics,

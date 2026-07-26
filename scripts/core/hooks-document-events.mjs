@@ -29,6 +29,7 @@ import {
   normalizeEnvironmentSystemData,
   normalizeLifestyleSystemData,
 } from "../data/normalization.mjs";
+import { stripTraitCharacteristicEffectsFromItemData } from "../data/content-loading.mjs";
 
 import {
   resolveStartingXpForNewCharacter,
@@ -37,7 +38,11 @@ import {
   applyGroupCreationDefaults,
 } from "../mechanics/xp.mjs";
 
-import { isGoodFortuneModeEnabled } from "../mechanics/derived.mjs";
+import {
+  computeCharacteristicModifiers,
+  computeActorNaturalArmorState,
+  isGoodFortuneModeEnabled,
+} from "../mechanics/derived.mjs";
 import { getActorEquippedGearMythicCharacteristicModifiers } from "../mechanics/mythic-characteristics.mjs";
 import {
   normalizeActorCharacterSystemData,
@@ -147,6 +152,59 @@ function getUpdatePath(updateData, path, fallback = undefined) {
     return foundry.utils.getProperty(updateData, path);
   }
   return fallback;
+}
+
+const NATURAL_ARMOR_SCAFFOLD_FLAG_PATH =
+  "flags.Halo-Mythic-Foundry-Updated.soldierTypeNaturalArmorScaffold";
+
+function buildNaturalArmorCandidateSystem(actor, changes = {}) {
+  const candidateSystem = foundry.utils.mergeObject(
+    foundry.utils.deepClone(actor?.system ?? {}),
+    foundry.utils.deepClone(changes?.system ?? {}),
+    {
+      inplace: false,
+      insertKeys: true,
+      insertValues: true,
+      overwrite: true,
+      recursive: true,
+    },
+  );
+  for (const [path, value] of Object.entries(changes ?? {})) {
+    if (!path.startsWith("system.")) continue;
+    foundry.utils.setProperty(candidateSystem, path.slice(7), value);
+  }
+  return candidateSystem;
+}
+
+function buildNaturalArmorCandidateFlags(actor, changes = {}) {
+  const candidateFlags = foundry.utils.mergeObject(
+    foundry.utils.deepClone(actor?.flags ?? {}),
+    foundry.utils.deepClone(changes?.flags ?? {}),
+    {
+      inplace: false,
+      insertKeys: true,
+      insertValues: true,
+      overwrite: true,
+      recursive: true,
+    },
+  );
+  if (hasUpdatePath(changes, NATURAL_ARMOR_SCAFFOLD_FLAG_PATH)) {
+    foundry.utils.setProperty(
+      candidateFlags,
+      "Halo-Mythic-Foundry-Updated.soldierTypeNaturalArmorScaffold",
+      getUpdatePath(changes, NATURAL_ARMOR_SCAFFOLD_FLAG_PATH),
+    );
+  }
+  return candidateFlags;
+}
+
+function persistCandidateNaturalArmor(actorType, systemData, flags, target) {
+  if (!["character", "bestiary"].includes(actorType)) return;
+  foundry.utils.setProperty(
+    target,
+    "system.combat.naturalArmor",
+    computeActorNaturalArmorState(actorType, systemData, flags),
+  );
 }
 
 function traceCharacteristicNormalization(actor, data = {}) {
@@ -5692,6 +5750,11 @@ export function registerMythicDocumentAndChatHooks({
         initialName,
       );
       foundry.utils.setProperty(createData, "system", normalized);
+      const characteristicStripped = stripTraitCharacteristicEffectsFromItemData({
+        ...createData,
+        type: item.type,
+      });
+      createData.effects = characteristicStripped.effects;
       stripBerserkerAutoEffectsFromItemData(createData);
       const currentImg = createData.img ?? item.img ?? "";
       if (
@@ -5784,6 +5847,20 @@ export function registerMythicDocumentAndChatHooks({
   Hooks.on("preUpdateItem", (item, changes) => {
     const nextName = String(changes.name ?? item.name ?? "").trim();
     const hasSystemChanges = changes.system !== undefined;
+    if (item.type === "trait" && Array.isArray(changes.effects)) {
+      const characteristicStripped = stripTraitCharacteristicEffectsFromItemData({
+        ...changes,
+        type: item.type,
+        name: nextName,
+      });
+      const stripped = stripBerserkerAutoEffectsFromItemData({
+        ...changes,
+        type: item.type,
+        name: nextName,
+        effects: characteristicStripped.effects,
+      });
+      changes.effects = stripped.effects;
+    }
 
     if (!hasSystemChanges) {
       if (changes.name === undefined) return;
@@ -5801,14 +5878,6 @@ export function registerMythicDocumentAndChatHooks({
       }
       if (item.type === "trait") {
         changes.system = normalizeTraitSystemData(item.system ?? {}, nextName);
-        if (Array.isArray(changes.effects)) {
-          const stripped = stripBerserkerAutoEffectsFromItemData({
-            ...changes,
-            type: item.type,
-            name: nextName,
-          });
-          changes.effects = stripped.effects;
-        }
         return;
       }
       if (item.type === "education") {
@@ -5868,14 +5937,6 @@ export function registerMythicDocumentAndChatHooks({
 
     if (item.type === "trait") {
       changes.system = normalizeTraitSystemData(nextSystem, nextName);
-      if (Array.isArray(changes.effects)) {
-        const stripped = stripBerserkerAutoEffectsFromItemData({
-          ...changes,
-          type: item.type,
-          name: nextName,
-        });
-        changes.effects = stripped.effects;
-      }
       return;
     }
 
@@ -5909,6 +5970,31 @@ export function registerMythicDocumentAndChatHooks({
     }
   });
 
+  Hooks.on("preCreateActiveEffect", (effect, createData) => {
+    const item = effect?.parent;
+    if (item?.documentName !== "Item" || item.type !== "trait") return;
+    const stripped = stripTraitCharacteristicEffectsFromItemData({
+      type: "trait",
+      effects: [createData],
+    });
+    if (!stripped.effects.length) return false;
+    createData.changes = stripped.effects[0].changes;
+  });
+
+  Hooks.on("preUpdateActiveEffect", (effect, changes) => {
+    const item = effect?.parent;
+    if (
+      item?.documentName !== "Item" ||
+      item.type !== "trait" ||
+      !Array.isArray(changes?.changes)
+    ) return;
+    const stripped = stripTraitCharacteristicEffectsFromItemData({
+      type: "trait",
+      effects: [{ changes: changes.changes }],
+    });
+    changes.changes = stripped.effects[0]?.changes ?? [];
+  });
+
   Hooks.on("preCreateActor", (actor, createData) => {
     if (actor.type === "character") {
       applyCharacterCreationDefaults(createData);
@@ -5917,6 +6003,12 @@ export function registerMythicDocumentAndChatHooks({
         foundry.utils.setProperty(normalized, "mythic.flyCombatActive", true);
       }
       foundry.utils.setProperty(createData, "system", normalized);
+      persistCandidateNaturalArmor(
+        actor.type,
+        normalized,
+        createData.flags ?? actor.flags ?? {},
+        createData,
+      );
       const tokenDefaults = getMythicTokenDefaultsForCharacter(normalized);
       foundry.utils.setProperty(
         createData,
@@ -5936,6 +6028,12 @@ export function registerMythicDocumentAndChatHooks({
     } else if (actor.type === "bestiary") {
       const normalized = normalizeBestiarySystemData(createData.system ?? {});
       foundry.utils.setProperty(createData, "system", normalized);
+      persistCandidateNaturalArmor(
+        actor.type,
+        normalized,
+        createData.flags ?? actor.flags ?? {},
+        createData,
+      );
       const tokenDefaults = getMythicTokenDefaultsForCharacter(normalized);
       foundry.utils.setProperty(
         createData,
@@ -6016,6 +6114,12 @@ export function registerMythicDocumentAndChatHooks({
       if (!actor.isOwner) return;
       if (actor.type === "character") {
         const updates = {};
+        persistCandidateNaturalArmor(
+          actor.type,
+          actor.system ?? {},
+          actor.flags ?? {},
+          updates,
+        );
         const currentImg = String(actor.img ?? "").trim();
         if (!currentImg || currentImg.startsWith("icons/svg/")) {
           foundry.utils.setProperty(
@@ -6134,8 +6238,14 @@ export function registerMythicDocumentAndChatHooks({
         }
 
         const normalized = normalizeBestiarySystemData(actor.system ?? {});
-        const tokenDefaults = getMythicTokenDefaultsForCharacter(normalized);
         foundry.utils.setProperty(updates, "system", normalized);
+        persistCandidateNaturalArmor(
+          actor.type,
+          normalized,
+          actor.flags ?? {},
+          updates,
+        );
+        const tokenDefaults = getMythicTokenDefaultsForCharacter(normalized);
         foundry.utils.setProperty(
           updates,
           "prototypeToken.bar1.attribute",
@@ -6210,7 +6320,15 @@ export function registerMythicDocumentAndChatHooks({
     }
   });
 
-  Hooks.on("preUpdateActor", (actor, changes) => {
+  Hooks.on("preUpdateActor", (actor, changes, options) => {
+    if (options?.mythicCanonicalMigrationV15 === true) return;
+    const naturalArmorActor = ["character", "bestiary"].includes(actor.type);
+    const candidateNaturalArmorSystem = naturalArmorActor
+      ? buildNaturalArmorCandidateSystem(actor, changes)
+      : null;
+    const candidateNaturalArmorFlags = naturalArmorActor
+      ? buildNaturalArmorCandidateFlags(actor, changes)
+      : null;
     const touchesCharacterSystem =
       changes.system !== undefined ||
       Object.keys(changes ?? {}).some((key) =>
@@ -6391,6 +6509,14 @@ export function registerMythicDocumentAndChatHooks({
       );
       nextSystem = preparedSystem.systemData;
       const finalCharacteristics = preparedSystem.finalCharacteristics;
+      const preparedCharacteristics = finalCharacteristics?.characteristics;
+      if (preparedSystem.applied === true && preparedCharacteristics) {
+        foundry.utils.setProperty(
+          nextSystem,
+          "characteristicModifiers",
+          computeCharacteristicModifiers(preparedCharacteristics),
+        );
+      }
       traceCharacteristicNormalization(actor, {
         beforeCharacteristics: beforeFinalCharacteristics,
         finalCharacteristics: finalCharacteristics?.characteristics,
@@ -6455,7 +6581,9 @@ export function registerMythicDocumentAndChatHooks({
         intendedWoundsBarValue,
         helperOutputUsingActorAndNextSystem: canonicalWounds,
       });
-      const normalized = normalizeCharacterSystemData(nextSystem);
+      const normalized = normalizeCharacterSystemData(nextSystem, {
+        preservePreparedCharacteristics: preparedSystem.applied === true,
+      });
       traceWounds(
         "preUpdate after normalization before canonical correction",
         actor,
@@ -6602,6 +6730,21 @@ export function registerMythicDocumentAndChatHooks({
         changes,
         "prototypeToken.displayBars",
         tokenDefaults.displayBars,
+      );
+    }
+
+    if (naturalArmorActor) {
+      const finalCandidateSystem = changes.system
+        ? buildNaturalArmorCandidateSystem(
+            { system: candidateNaturalArmorSystem },
+            { system: changes.system },
+          )
+        : candidateNaturalArmorSystem;
+      persistCandidateNaturalArmor(
+        actor.type,
+        finalCandidateSystem,
+        candidateNaturalArmorFlags,
+        changes,
       );
     }
 

@@ -1,9 +1,17 @@
+node_modules/
+
+# Local extraction, validation, and release artifacts.
+._zip_restore/
+__zip_validate/
+__forge_test_download.zip
+__tag_system.json
+_packs_restore.tar
+
+# Foundry LevelDB lock/session files. Data-bearing pack files
+# (CURRENT, MANIFEST-*, .ldb, and numbered .log files) are tracked.
 packs/**/LOCK
 packs/**/LOG
 packs/**/LOG.old
-packs/**/CURRENT
-packs/**/*.ldb
-packs/**/MANIFEST-*
 packs/**/LOG.bak
 packs/**/lost/
 

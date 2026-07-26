@@ -1472,28 +1472,54 @@ export function parseTraitTextStatBonuses(text) {
     .map(([key, value]) => ({ key, value: Math.trunc(value) }));
 }
 
-export function buildTraitAutoEffects(definition) {
-  if (String(definition?.name ?? "").trim().toLowerCase() === "berserker") return [];
+export function buildTraitAutoEffects(_definition) {
+  // Trait characteristic text is intentionally descriptive during alpha.
+  // Situation-specific bonuses must not become unconditional Active Effects.
+  return [];
+}
 
-  const benefit = String(definition?.benefit ?? "");
-  const parsedBonuses = parseTraitTextStatBonuses(benefit);
-  if (!parsedBonuses.length) return [];
+export function stripTraitCharacteristicEffectsFromItemData(itemData = {}) {
+  if (String(itemData?.type ?? "").trim().toLowerCase() !== "trait") {
+    return {
+      changed: false,
+      effects: Array.isArray(itemData?.effects) ? itemData.effects : [],
+      removedChanges: 0,
+      removedEffects: 0
+    };
+  }
 
-  const mode = CONST.ACTIVE_EFFECT_MODES?.ADD ?? 2;
-  const changes = parsedBonuses.map((entry) => ({
-    key: `system.characteristics.${entry.key}`,
-    mode,
-    value: String(entry.value),
-    priority: 20
-  }));
+  const sourceEffects = Array.isArray(itemData?.effects) ? itemData.effects : [];
+  const effects = [];
+  let removedChanges = 0;
+  let removedEffects = 0;
 
-  return [{
-    name: "Trait Auto Modifiers",
-    transfer: true,
-    disabled: false,
-    description: "Auto-generated from trait bonus/penalty text.",
-    changes
-  }];
+  for (const sourceEffect of sourceEffects) {
+    const effect = typeof sourceEffect?.toObject === "function"
+      ? sourceEffect.toObject()
+      : foundry.utils.deepClone(sourceEffect ?? {});
+    const sourceChanges = Array.isArray(effect?.changes) ? effect.changes : [];
+    const changes = sourceChanges.filter((change) => {
+      const key = String(change?.key ?? "").trim();
+      return !key.startsWith("system.characteristics.");
+    });
+    removedChanges += sourceChanges.length - changes.length;
+
+    if (!changes.length && sourceChanges.length > 0) {
+      removedEffects += 1;
+      continue;
+    }
+
+    effect.changes = changes;
+    effects.push(effect);
+  }
+
+  itemData.effects = effects;
+  return {
+    changed: removedChanges > 0,
+    effects,
+    removedChanges,
+    removedEffects
+  };
 }
 
 /**
