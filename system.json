@@ -5,7 +5,7 @@
   "version": "0.5.0-alpha.5",
   "license": "SEE LICENSE and LICENSE.assets",
   "manifest": "https://raw.githubusercontent.com/MildlyFootwear/Halo-Mythic-Foundry-Updated-Patches/refs/heads/main/system.json",
-  "download": "",
+  "download": "https://github.com/MildlyFootwear/Halo-Mythic-Foundry-Updated-Patches/archive/refs/heads/main.zip",
 
   "url": "https://github.com/edwilke86/Halo-Mythic-Foundry-Updated",
   "compatibility": {
