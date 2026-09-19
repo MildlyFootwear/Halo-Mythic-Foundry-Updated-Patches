@@ -18,3 +18,4 @@ packs/**/lost/
 # Raw rule-reference source documents for local research only.
 # Tracked spreadsheet exports should live under data/reference/ instead.
 rule references/
+/.vs/Halo-Mythic-Foundry-Updated-Patches.slnx/FileContentIndex/1e74b623-400b-4741-a5c8-a380a6592e39.vsidx
