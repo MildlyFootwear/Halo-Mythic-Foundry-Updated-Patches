@@ -1,12 +1,12 @@
 {
-  "id": "Halo-Mythic-Foundry-Updated",
-  "title": "Halo Mythic Foundry Updated",
+  "id": "Halo-Mythic-Foundry-Shoey",
+  "title": "Shoey's Halo Mythic Foundry Updated",
   "description": "Community Foundry VTT system project for the Halo Mythic ruleset.",
-    "version": "0.5.0-alpha.5",
+  "version": "0.5.0-alpha.5",
   "license": "SEE LICENSE and LICENSE.assets",
-    "manifest": "https://raw.githubusercontent.com/edwilke86/Halo-Mythic-Foundry-Updated/main/system.json",
+  "manifest": "https://raw.githubusercontent.com/edwilke86/Halo-Mythic-Foundry-Updated/main/system.json",
   "download": "https://github.com/edwilke86/Halo-Mythic-Foundry-Updated/releases/download/0.5.0-alpha.5/halo-mythic-foundry-updated-0.5.0-alpha.5-20260509.zip",
-  
+
   "url": "https://github.com/edwilke86/Halo-Mythic-Foundry-Updated",
   "compatibility": {
     "minimum": 13,
@@ -95,13 +95,13 @@
         ]
       },
       "upbringing": {
-        "htmlFields": ["description"]
+        "htmlFields": [ "description" ]
       },
       "environment": {
-        "htmlFields": ["description"]
+        "htmlFields": [ "description" ]
       },
       "lifestyle": {
-        "htmlFields": ["description"]
+        "htmlFields": [ "description" ]
       }
     }
   },
@@ -611,7 +611,7 @@
       }
     }
   ],
-  
+
   "primaryTokenAttribute": { "attribute": "system.combat.wounds" },
   "secondaryTokenAttribute": { "attribute": "system.combat.shields" },
   "socket": true
