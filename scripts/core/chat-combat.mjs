@@ -621,7 +621,7 @@ export async function mythicRollEvasion(
 
       const evasionRoll = await new Roll("1d100").evaluate();
       messageRolls.push(evasionRoll);
-      if (evasionRoll.toString().includes("Cancel"))
+      if (evasionRoll.toString().includes("Cancel") || evasionRoll.toString().includes("NaN"))
       {
           return;
       }
