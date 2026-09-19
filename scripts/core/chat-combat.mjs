@@ -621,6 +621,10 @@ export async function mythicRollEvasion(
 
       const evasionRoll = await new Roll("1d100").evaluate();
       messageRolls.push(evasionRoll);
+      if (evasionRoll.toString().includes("Cancel"))
+      {
+          return;
+      }
       const evasionResult = evasionRoll.total;
       const evasionDOS = computeAttackDOS(evasionTarget, evasionResult);
       const evasionSuccess = evasionDOS >= 0;
